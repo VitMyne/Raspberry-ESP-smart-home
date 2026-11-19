@@ -26,8 +26,8 @@
 #include <ArduinoJson.h>
 
 // --- Configure these before uploading --------------------------------------
-const char *WIFI_SSID = "F.U.T.U.R.E Wi-Fi";
-const char *WIFI_PASSWORD = "VeViDiAlNa3117290126";
+const char *WIFI_SSID = "---";
+const char *WIFI_PASSWORD = "---";
 const char *ROOM_NAME = "bedroom1";  // Must be unique on your Wi-Fi.
 
 // Add each physical device in this room below. The server sends the complete
