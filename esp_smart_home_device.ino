@@ -31,9 +31,10 @@
 const char *WIFI_SSID = "---";
 const char *WIFI_PASSWORD = "---";
 const char *ROOM_NAME = "bedroom1";  // Must be unique on your Wi-Fi.
+const char *ROOM_FRIENDLY_NAME = "Bedroom 1";
 
 // Define all devices and their commands in this one JSON object. Command types
-// are "raw", "int", "str", or "list". Raw commands use {"cmd":"on"};
+// are "raw", "int", "str", "bool", or "list". Raw commands use {"cmd":"on"};
 // typed commands use their name as the JSON key, e.g. {"change_temp":20}.
 // Add more devices as siblings of "main_lamp", and add device-specific
 // handling for their commands in handlePacket().
@@ -43,17 +44,17 @@ const char ROOM_INFO_JSON[] = R"json(
     "device": {
         "main_lamp": {
             "cmds": {
-                "on": "raw",
-                "off": "raw"
-            }
+                "power": "bool"
+            },
+            "friendly_name": "Main lamp"
         },
         "leds": {
             "cmds": {
-                "on": "raw",
-                "off": "raw",
+                "power": "bool",
                 "col": "str",
                 "brightness": "int"
-            }
+            },
+            "friendly_name": "LED strips"
         }
     }
 }
@@ -113,11 +114,15 @@ void connectToWifi() {
 void sendDiscoveryReply(IPAddress destination, uint16_t port) {
   StaticJsonDocument<1536> reply;
   reply["room"] = ROOM_NAME;
+  reply["friendly_name"] = ROOM_FRIENDLY_NAME;
   JsonObject devices = reply.createNestedObject("devices");
   JsonObject configuredDevices = room_info["device"].as<JsonObject>();
   for (JsonPair devicePair : configuredDevices) {
     JsonObject device = devicePair.value().as<JsonObject>();
     JsonObject deviceReply = devices.createNestedObject(devicePair.key().c_str());
+    if (device["friendly_name"].is<const char *>()) {
+      deviceReply["friendly_name"] = device["friendly_name"].as<const char *>();
+    }
     JsonArray commands = deviceReply.createNestedArray("cmds");
     JsonObject configuredCommands = device["cmds"].as<JsonObject>();
     for (JsonPair commandPair : configuredCommands) {
@@ -147,6 +152,9 @@ bool hasValidArgument(JsonDocument &message, const char *name, const char *argum
   }
   if (strcmp(argumentType, "str") == 0) {
     return argument.is<const char *>();
+  }
+  if (strcmp(argumentType, "bool") == 0) {
+    return argument.is<bool>();
   }
   if (strcmp(argumentType, "list") == 0) {
     return argument.is<JsonArray>();
@@ -256,14 +264,10 @@ void handlePacket() {
     return;
   }
 
-  if (strcmp(deviceName, "main_lamp") == 0 && strcmp(commandName, "on") == 0) {
-    setOutput(true);
-  } else if (strcmp(deviceName, "main_lamp") == 0 && strcmp(commandName, "off") == 0) {
-    setOutput(false);
-  } else if (strcmp(deviceName, "leds") == 0 && strcmp(commandName, "on") == 0) {
-    set_led(true, ledBrightness);
-  } else if (strcmp(deviceName, "leds") == 0 && strcmp(commandName, "off") == 0) {
-    set_led(false, ledBrightness);
+  if (strcmp(deviceName, "main_lamp") == 0 && strcmp(commandName, "power") == 0) {
+    setOutput(message["power"].as<bool>());
+  } else if (strcmp(deviceName, "leds") == 0 && strcmp(commandName, "power") == 0) {
+    set_led(message["power"].as<bool>(), ledBrightness);
   } else if (strcmp(deviceName, "leds") == 0 && strcmp(commandName, "col") == 0) {
     const char *colorValue = message["col"] | "";
     uint32_t color;

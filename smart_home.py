@@ -60,7 +60,7 @@ HOST, WIFI_NETWORK = get_wifi_network()
 PORT = 37019
 DISCOVERY_PORT = 37020
 rooms = {}
-COMMAND_TYPES = {"raw", "int", "str", "list"}
+COMMAND_TYPES = {"raw", "int", "str", "bool", "list"}
 
 
 def configure_logging():
@@ -124,21 +124,34 @@ def discover_rooms(timeout=2):
                 response, address = discovery_socket.recvfrom(1024)
                 reply = json.loads(response.decode("utf-8"))
                 room = reply["room"]
+                room_friendly_name = reply.get("friendly_name")
                 room_devices = reply.get("devices")
                 if (
                     isinstance(room, str)
+                    and (
+                        "friendly_name" not in reply
+                        or isinstance(room_friendly_name, str)
+                    )
                     and isinstance(room_devices, dict)
                     and all(
                         isinstance(device_name, str)
                         and isinstance(device, dict)
+                        and (
+                            "friendly_name" not in device
+                            or isinstance(device["friendly_name"], str)
+                        )
                         and is_command_schema(device.get("cmds"))
                         for device_name, device in room_devices.items()
                     )
                     and ipaddress.ip_address(address[0]) in WIFI_NETWORK
                 ):
-                    rooms[room] = {"address": address[0], "devices": room_devices}
+                    room_info = {"address": address[0], "devices": room_devices}
+                    if room_friendly_name is not None:
+                        room_info["friendly_name"] = room_friendly_name
+                    rooms[room] = room_info
                     logger.info(
-                        "Discovered room '%s' at %s with %d device(s)",
+                        "Discovered room '%s' (%s) at %s with %d device(s)",
+                        room_friendly_name or room,
                         room,
                         address[0],
                         len(room_devices),
@@ -206,6 +219,8 @@ def is_advertised_command(room, device, message):
         if command_type == "int" and isinstance(argument, int) and not isinstance(argument, bool):
             return True
         if command_type == "str" and isinstance(argument, str):
+            return True
+        if command_type == "bool" and isinstance(argument, bool):
             return True
         if command_type == "list" and isinstance(argument, list):
             return True

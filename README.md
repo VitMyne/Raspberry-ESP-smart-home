@@ -5,24 +5,25 @@ The server listens for TCP clients on the active local network address at port `
 ```json
 {
   "room": "bedroom1",
+  "friendly_name": "Bedroom 1",
   "devices": {
     "main_lamp": {
+      "friendly_name": "Main lamp",
       "cmds": [
-        {"name": "on", "type": "raw"},
-        {"name": "off", "type": "raw"}
+        {"name": "power", "type": "bool"}
       ]
     }
   }
 }
 ```
 
-The server keeps each discovered room controller's address along with its device/command list. A client can request all rooms with `{"cmd":"list_rooms"}`; the response is `{"rooms":{...}}`, with each room containing `address` and `devices`. Commands identify both the room and device, for example `{"room":"bedroom1","device":"main_lamp","cmd":"on"}`. The server validates commands against the controller's advertised schema, forwards them to that room controller over UDP, and relays its one-byte response.
+The server keeps each discovered room controller's address, friendly room name, and device/command list. Each device may also advertise a `friendly_name`. A client can request all rooms with `{"cmd":"list_rooms"}`; the response is `{"rooms":{...}}`, with each room containing `address`, optional `friendly_name`, and `devices`; each device contains its optional `friendly_name` and commands. The web and terminal clients use these advertised names by default, while locally saved renames take precedence. Older controllers that omit friendly names continue to display their IDs. Commands identify both the room and device, for example `{"room":"bedroom1","device":"main_lamp","power":true}`. The server validates commands against the controller's advertised schema, forwards them to that room controller over UDP, and relays its one-byte response.
 
 The web client groups devices beneath collapsible room headings. Expand a room to see its devices and advertised command controls. Enable developer mode in Settings to expose custom JSON commands and device selection.
 
 ## Command types
 
-Each advertised command has a `name` and `type`. `raw` commands are sent as `{"cmd": "on"}`. For `int`, `str`, and `list`, the command name is the JSON key: `{"change_temp": 20}`, `{"set_name": "Bedroom"}`, or `{"set_schedule": ["weekday", "weekend"]}`. The server validates these shapes before forwarding them.
+Each advertised command has a `name` and `type`. `raw` commands are sent as `{"cmd": "on"}`. For `int`, `str`, `bool`, and `list`, the command name is the JSON key: `{"change_temp": 20}`, `{"set_name": "Bedroom"}`, `{"power": true}`, or `{"set_schedule": ["weekday", "weekend"]}`. Boolean commands must use JSON `true` or `false` (not numeric `1` or `0`). The web client renders a boolean command as a toggle button, initially off; it sends the opposite value and changes its displayed state only after the device reports success. The server validates these shapes before forwarding them.
 
 ## Response bytes
 

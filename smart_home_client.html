@@ -10,6 +10,7 @@
     header, .toolbar, .device, .command, .device-actions { display: flex; gap: .75rem; align-items: center; }
     header { justify-content: space-between; } button { background: #4f7cff; color: white; border: 0; border-radius: .45rem; padding: .6rem .9rem; cursor: pointer; }
     button:hover { background: #3c67de; } button.selected { outline: 3px solid #99b3ff; }
+    button.bool-toggle[aria-pressed="true"] { background: #23885a; }
     #rooms { display: grid; gap: .7rem; margin: 1rem 0 1.5rem; }
     .room, .device, .command, .settings { background: #1b2130; border-radius: .6rem; }
     .room { overflow: hidden; }
@@ -43,11 +44,11 @@
   <section id="developer-command" class="command" hidden>
     <strong id="selected">Select a room device</strong>
     <label for="command">Custom command JSON</label>
-    <textarea id="command" spellcheck="false">{"cmd": "on"}</textarea>
+    <textarea id="command" spellcheck="false">{"power": true}</textarea>
     <button id="send" disabled>Send custom command</button>
   </section>
   <script>
-    const state = { rooms: {}, names: {}, selected: null, openRooms: new Set() };
+    const state = { rooms: {}, names: {}, selected: null, openRooms: new Set(), boolValues: {} };
     const roomsElement = document.querySelector('#rooms');
     const statusElement = document.querySelector('#status');
     const selectedElement = document.querySelector('#selected');
@@ -66,11 +67,11 @@
       if (!entries.length) { roomsElement.innerHTML = '<p>No rooms are currently discovered by the server.</p>'; return; }
       roomsElement.innerHTML = entries.map(([roomId, room]) => `
         <details class="room" data-room="${escapeHtml(roomId)}" ${state.openRooms.has(roomId) ? 'open' : ''}>
-        <summary><span class="room-name">${escapeHtml(state.names[roomKey(roomId)] || roomId)}</span><span class="id">${escapeHtml(roomId)} · Controller: ${escapeHtml(room.address)}</span></summary>
+        <summary><span class="room-name">${escapeHtml(state.names[roomKey(roomId)] || room.friendly_name || roomId)}</span><span class="id">${escapeHtml(roomId)} · Controller: ${escapeHtml(room.address)}</span></summary>
         <div class="room-body"><input data-room-name="${escapeHtml(roomId)}" aria-label="Friendly room name for ${escapeHtml(roomId)}" value="${escapeHtml(state.names[roomKey(roomId)] || '')}" placeholder="Friendly room name">
         ${Object.entries(room.devices).map(([deviceId, device]) => {
           const key = deviceKey(roomId, deviceId); const selected = state.selected && state.selected.room === roomId && state.selected.device === deviceId;
-          return `<article class="device"><div class="details"><strong>${escapeHtml(state.names[key] || deviceId)}</strong><div class="id">${escapeHtml(deviceId)}</div></div>
+          return `<article class="device"><div class="details"><strong>${escapeHtml(state.names[key] || device.friendly_name || deviceId)}</strong><div class="id">${escapeHtml(deviceId)}</div></div>
           <input data-name-room="${escapeHtml(roomId)}" data-name-device="${escapeHtml(deviceId)}" value="${escapeHtml(state.names[key] || '')}" placeholder="Friendly name">
           <button data-select-room="${escapeHtml(roomId)}" data-select-device="${escapeHtml(deviceId)}" class="device-select ${selected ? 'selected' : ''}">Select</button>
           <div class="device-actions">${device.cmds.map(command => commandControl(roomId, deviceId, command)).join('') || '<span class="id">No commands advertised</span>'}</div></article>`;
@@ -84,12 +85,18 @@
       document.querySelectorAll('[data-room-name]').forEach(input => input.onchange = () => saveRoomName(input.dataset.roomName, input.value));
       document.querySelectorAll('[data-raw-command]').forEach(button => button.onclick = () => sendCommand(button.dataset.room, button.dataset.device, {cmd: button.dataset.rawCommand}));
       document.querySelectorAll('[data-run-command]').forEach(button => button.onclick = () => runTypedCommand(button));
+      document.querySelectorAll('[data-bool-command]').forEach(button => button.onclick = () => toggleBoolCommand(button));
     }
     function deviceKey(room, device) { return `${room}/${device}`; }
     function roomKey(room) { return `@room:${room}`; }
     function commandControl(room, device, command) {
       const name = escapeHtml(command.name); const type = escapeHtml(command.type); const roomId = escapeHtml(room); const deviceId = escapeHtml(device);
       if (command.type === 'raw') return `<button data-raw-command="${name}" data-room="${roomId}" data-device="${deviceId}">${name}</button>`;
+      if (command.type === 'bool') {
+        const key = `${deviceKey(room, device)}/${command.name}`;
+        const value = state.boolValues[key] === true;
+        return `<button class="bool-toggle" data-bool-command data-room="${roomId}" data-device="${deviceId}" data-command-name="${name}" aria-pressed="${value}">${name}: ${value ? 'ON' : 'OFF'}</button>`;
+      }
       const input = command.type === 'int'
         ? `<input data-command-value type="number" step="1" placeholder="number">`
         : command.type === 'list'
@@ -98,7 +105,7 @@
       return `<span class="typed-command"><label>${name} (${type}) ${input}</label><button data-run-command data-room="${roomId}" data-device="${deviceId}" data-command-name="${name}" data-command-type="${type}">Send</button></span>`;
     }
     function selectDevice(room, device) {
-      state.selected = {room, device}; const key = deviceKey(room, device); selectedElement.textContent = `Selected: ${room} / ${state.names[key] || device}`; sendButton.disabled = false; render();
+      state.selected = {room, device}; const key = deviceKey(room, device); const deviceInfo = state.rooms[room].devices[device]; selectedElement.textContent = `Selected: ${room} / ${state.names[key] || deviceInfo.friendly_name || device}`; sendButton.disabled = false; render();
     }
     async function refresh() {
       setStatus('Loading rooms…');
@@ -114,8 +121,20 @@
       catch (error) { setStatus(error.message, true); }
     }
     async function sendCommand(room, device, command) {
-      try { const response = await fetch('/api/send', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({room, device, command})}); const data = await response.json(); if (!response.ok) throw Error(data.error); setStatus(data.response); }
-      catch (error) { setStatus(error.message, true); }
+      try { const response = await fetch('/api/send', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({room, device, command})}); const data = await response.json(); if (!response.ok) throw Error(data.error); setStatus(data.response); return data.response === 'Device reported success.'; }
+      catch (error) { setStatus(error.message, true); return false; }
+    }
+    async function toggleBoolCommand(button) {
+      const {room, device, commandName} = button.dataset;
+      const key = `${deviceKey(room, device)}/${commandName}`;
+      const nextValue = state.boolValues[key] !== true;
+      button.disabled = true;
+      if (await sendCommand(room, device, {[commandName]: nextValue})) {
+        state.boolValues[key] = nextValue;
+        render();
+      } else {
+        button.disabled = false;
+      }
     }
     function runTypedCommand(button) {
       const input = button.parentElement.querySelector('[data-command-value]');

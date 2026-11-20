@@ -56,14 +56,22 @@ def get_rooms(server_host):
         and isinstance(room, dict)
         and isinstance(room.get("address"), str)
         and isinstance(room.get("devices"), dict)
+        and (
+            "friendly_name" not in room
+            or isinstance(room.get("friendly_name"), str)
+        )
         and all(
             isinstance(device_id, str)
             and isinstance(device, dict)
+            and (
+                "friendly_name" not in device
+                or isinstance(device.get("friendly_name"), str)
+            )
             and isinstance(device.get("cmds"), list)
             and all(
                 isinstance(command, dict)
                 and isinstance(command.get("name"), str)
-                and command.get("type") in {"raw", "int", "str", "list"}
+                and command.get("type") in {"raw", "int", "str", "bool", "list"}
                 for command in device["cmds"]
             )
             for device_id, device in room["devices"].items()
@@ -86,12 +94,16 @@ def choose_device(rooms, names):
     targets = []
     print("\nDiscovered rooms and devices:")
     for room_id, room in rooms.items():
-        room_name = names.get(room_key(room_id))
-        room_label = f"{room_name} ({room_id})" if room_name else room_id
+        room_name = names.get(room_key(room_id)) or room.get("friendly_name") or room_id
+        room_label = f"{room_name} ({room_id})" if room_name != room_id else room_id
         print(f"  {room_label} ({room['address']}):")
         for device_id, device in room["devices"].items():
             targets.append((room_id, device_id))
-            friendly_name = names.get(device_key(room_id, device_id), device_id)
+            friendly_name = (
+                names.get(device_key(room_id, device_id))
+                or device.get("friendly_name")
+                or device_id
+            )
             commands = ", ".join(
                 f"{command['name']} ({command['type']})" for command in device["cmds"]
             ) or "no advertised commands"
@@ -116,7 +128,11 @@ def rename_room(rooms, names):
     room_ids = list(rooms)
     print("Rooms:")
     for index, room_id in enumerate(room_ids, start=1):
-        friendly_name = names.get(room_key(room_id), room_id)
+        friendly_name = (
+            names.get(room_key(room_id))
+            or rooms[room_id].get("friendly_name")
+            or room_id
+        )
         print(f"  {index}. {friendly_name} ({room_id})")
     choice = input("Room number to rename: ").strip()
     if not choice.isdigit() or not 1 <= int(choice) <= len(room_ids):
