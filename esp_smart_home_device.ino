@@ -9,7 +9,8 @@
   Commands understood by this example:
     {"room":"bedroom1","device":"main_lamp","cmd":"on"}
     {"room":"bedroom1","device":"main_lamp","cmd":"off"}
-    {"room":"bedroom1","device":"main_lamp","cmd":"toggle"}
+    {"room":"bedroom1","device":"leds","col":"FF0000"}  // red
+    {"room":"bedroom1","device":"leds","brightness":128}
 
   Protocol responses are one byte:
     '1' = command completed
@@ -24,59 +25,75 @@
 
 #include <WiFiUdp.h>
 #include <ArduinoJson.h>
+#include <string.h>
 
 // --- Configure these before uploading --------------------------------------
 const char *WIFI_SSID = "---";
 const char *WIFI_PASSWORD = "---";
 const char *ROOM_NAME = "bedroom1";  // Must be unique on your Wi-Fi.
 
-// Add each physical device in this room below. The server sends the complete
-// room -> device -> command schema to clients.
-//
-// "raw" commands are sent as {"cmd":"on"}.
-// "int", "str", and "list" commands are sent as {"command_name": value}.
-// For a thermostat, add {"change_temp", "int"}; the client will send
-// {"change_temp":20}. Add matching device logic in handlePacket() below.
-struct CommandDefinition {
-  const char *name;
-  const char *argumentType;
-};
+// Define all devices and their commands in this one JSON object. Command types
+// are "raw", "int", "str", or "list". Raw commands use {"cmd":"on"};
+// typed commands use their name as the JSON key, e.g. {"change_temp":20}.
+// Add more devices as siblings of "main_lamp", and add device-specific
+// handling for their commands in handlePacket().
+StaticJsonDocument<1024> room_info;
+const char ROOM_INFO_JSON[] = R"json(
+{
+    "device": {
+        "main_lamp": {
+            "cmds": {
+                "on": "raw",
+                "off": "raw"
+            }
+        },
+        "leds": {
+            "cmds": {
+                "on": "raw",
+                "off": "raw",
+                "col": "str",
+                "brightness": "int"
+            }
+        }
+    }
+}
+)json";
 
-const CommandDefinition MAIN_LAMP_COMMANDS[] = {
-  {"on", "raw"},
-  {"off", "raw"},
-  {"toggle", "raw"},
-  // {"change_temp", "int"},
-  // {"set_name", "str"},
-  // {"set_schedule", "list"},
-};
-
-struct DeviceDefinition {
-  const char *name;
-  const CommandDefinition *commands;
-  size_t commandCount;
-};
-
-const DeviceDefinition ROOM_DEVICES[] = {
-  {"main_lamp", MAIN_LAMP_COMMANDS, sizeof(MAIN_LAMP_COMMANDS) / sizeof(MAIN_LAMP_COMMANDS[0])},
-  // {"thermostat", THERMOSTAT_COMMANDS, sizeof(THERMOSTAT_COMMANDS) / sizeof(THERMOSTAT_COMMANDS[0])},
-};
-constexpr size_t ROOM_DEVICE_COUNT = sizeof(ROOM_DEVICES) / sizeof(ROOM_DEVICES[0]);
-
-// Connect a relay, LED, or other output to this pin.
+// Connect the main_lamp relay or output to this pin.
 const uint8_t OUTPUT_PIN = LED_BUILTIN;
 const bool OUTPUT_ACTIVE_HIGH = true;
+// col is a six-digit RRGGBB hex string (optional leading #); brightness is a
+// integer from 0 to 255. Connect a standard RGB LED to these PWM pins.
+const uint8_t LED_RED_PIN = 13;
+const uint8_t LED_GREEN_PIN = 12;
+const uint8_t LED_BLUE_PIN = 14;
+// Set false for a common-anode RGB LED.
+const bool LED_RGB_ACTIVE_HIGH = true;
 // ---------------------------------------------------------------------------
 
 constexpr uint16_t DISCOVERY_PORT = 37020;
 WiFiUDP udp;
-bool outputOn = false;
+uint32_t ledColor = 0xFFFFFF;
+int ledBrightness = 255;
+bool ledOn = false;
 
 
 void setOutput(bool on) {
-  outputOn = on;
-  const uint8_t level = (on == OUTPUT_ACTIVE_HIGH) ? HIGH : LOW;
-  digitalWrite(OUTPUT_PIN, level);
+  digitalWrite(OUTPUT_PIN, on == OUTPUT_ACTIVE_HIGH ? HIGH : LOW);
+}
+
+
+void set_led(bool on, int brightness) {
+  const int level = on ? brightness : 0;
+  const int red = ((ledColor >> 16) & 0xFF) * level / 255;
+  const int green = ((ledColor >> 8) & 0xFF) * level / 255;
+  const int blue = (ledColor & 0xFF) * level / 255;
+
+  analogWrite(LED_RED_PIN, LED_RGB_ACTIVE_HIGH ? red : 255 - red);
+  analogWrite(LED_GREEN_PIN, LED_RGB_ACTIVE_HIGH ? green : 255 - green);
+  analogWrite(LED_BLUE_PIN, LED_RGB_ACTIVE_HIGH ? blue : 255 - blue);
+  ledOn = on;
+  ledBrightness = brightness;
 }
 
 
@@ -94,17 +111,19 @@ void connectToWifi() {
 
 
 void sendDiscoveryReply(IPAddress destination, uint16_t port) {
-  StaticJsonDocument<1024> reply;
+  StaticJsonDocument<1536> reply;
   reply["room"] = ROOM_NAME;
   JsonObject devices = reply.createNestedObject("devices");
-  for (size_t deviceIndex = 0; deviceIndex < ROOM_DEVICE_COUNT; ++deviceIndex) {
-    const DeviceDefinition &device = ROOM_DEVICES[deviceIndex];
-    JsonObject deviceReply = devices.createNestedObject(device.name);
+  JsonObject configuredDevices = room_info["device"].as<JsonObject>();
+  for (JsonPair devicePair : configuredDevices) {
+    JsonObject device = devicePair.value().as<JsonObject>();
+    JsonObject deviceReply = devices.createNestedObject(devicePair.key().c_str());
     JsonArray commands = deviceReply.createNestedArray("cmds");
-    for (size_t commandIndex = 0; commandIndex < device.commandCount; ++commandIndex) {
+    JsonObject configuredCommands = device["cmds"].as<JsonObject>();
+    for (JsonPair commandPair : configuredCommands) {
       JsonObject command = commands.createNestedObject();
-      command["name"] = device.commands[commandIndex].name;
-      command["type"] = device.commands[commandIndex].argumentType;
+      command["name"] = commandPair.key().c_str();
+      command["type"] = commandPair.value().as<const char *>();
     }
   }
 
@@ -121,38 +140,48 @@ void sendStatus(IPAddress destination, uint16_t port, char status) {
 }
 
 
-const DeviceDefinition *findDevice(const char *name) {
-  for (size_t index = 0; index < ROOM_DEVICE_COUNT; ++index) {
-    if (strcmp(name, ROOM_DEVICES[index].name) == 0) {
-      return &ROOM_DEVICES[index];
-    }
-  }
-  return nullptr;
-}
-
-
-const CommandDefinition *findCommand(const DeviceDefinition *device, const char *name) {
-  for (size_t index = 0; index < device->commandCount; ++index) {
-    if (strcmp(name, device->commands[index].name) == 0) {
-      return &device->commands[index];
-    }
-  }
-  return nullptr;
-}
-
-
-bool hasValidArgument(JsonDocument &message, const CommandDefinition *command) {
-  JsonVariant argument = message[command->name];
-  if (strcmp(command->argumentType, "int") == 0) {
+bool hasValidArgument(JsonDocument &message, const char *name, const char *argumentType) {
+  JsonVariant argument = message[name];
+  if (strcmp(argumentType, "int") == 0) {
     return argument.is<int>();
   }
-  if (strcmp(command->argumentType, "str") == 0) {
+  if (strcmp(argumentType, "str") == 0) {
     return argument.is<const char *>();
   }
-  if (strcmp(command->argumentType, "list") == 0) {
+  if (strcmp(argumentType, "list") == 0) {
     return argument.is<JsonArray>();
   }
   return false;
+}
+
+
+bool parseHexColor(const char *value, uint32_t &color) {
+  if (value == nullptr) {
+    return false;
+  }
+  if (value[0] == '#') {
+    ++value;
+  }
+  if (strlen(value) != 6) {
+    return false;
+  }
+
+  color = 0;
+  for (int i = 0; i < 6; ++i) {
+    const char digit = value[i];
+    uint8_t nibble;
+    if (digit >= '0' && digit <= '9') {
+      nibble = digit - '0';
+    } else if (digit >= 'a' && digit <= 'f') {
+      nibble = digit - 'a' + 10;
+    } else if (digit >= 'A' && digit <= 'F') {
+      nibble = digit - 'A' + 10;
+    } else {
+      return false;
+    }
+    color = (color << 4) | nibble;
+  }
+  return true;
 }
 
 
@@ -194,38 +223,66 @@ void handlePacket() {
     return;
   }
 
-  const DeviceDefinition *device = findDevice(deviceName);
-  if (device == nullptr) {
+  JsonObject device = room_info["device"][deviceName].as<JsonObject>();
+  if (device.isNull()) {
     sendStatus(sender, senderPort, '2');
     return;
   }
 
-  const CommandDefinition *command = findCommand(device, rawCommand);
-  if (command == nullptr || strcmp(command->argumentType, "raw") != 0) {
+  JsonObject configuredCommands = device["cmds"].as<JsonObject>();
+  const char *commandName = nullptr;
+  const char *commandType = nullptr;
+  const char *rawCommandType = configuredCommands[rawCommand].as<const char *>();
+  if (rawCommandType != nullptr && strcmp(rawCommandType, "raw") == 0) {
+    commandName = rawCommand;
+    commandType = rawCommandType;
+  } else {
     // A typed command uses its name as the JSON key, e.g. {"change_temp":20}.
-    for (size_t index = 0; index < device->commandCount; ++index) {
-      if (strcmp(device->commands[index].argumentType, "raw") != 0
-          && hasValidArgument(message, &device->commands[index])) {
-        command = &device->commands[index];
+    for (JsonPair commandPair : configuredCommands) {
+      const char *candidateType = commandPair.value().as<const char *>();
+      const char *candidateName = commandPair.key().c_str();
+      if (candidateType != nullptr
+          && strcmp(candidateType, "raw") != 0
+          && hasValidArgument(message, candidateName, candidateType)) {
+        commandName = candidateName;
+        commandType = candidateType;
         break;
       }
     }
   }
 
-  if (command == nullptr) {
+  if (commandName == nullptr) {
     sendStatus(sender, senderPort, '2');
     return;
   }
 
-  if (strcmp(device->name, "main_lamp") == 0 && strcmp(command->name, "on") == 0) {
+  if (strcmp(deviceName, "main_lamp") == 0 && strcmp(commandName, "on") == 0) {
     setOutput(true);
-  } else if (strcmp(device->name, "main_lamp") == 0 && strcmp(command->name, "off") == 0) {
+  } else if (strcmp(deviceName, "main_lamp") == 0 && strcmp(commandName, "off") == 0) {
     setOutput(false);
-  } else if (strcmp(device->name, "main_lamp") == 0 && strcmp(command->name, "toggle") == 0) {
-    setOutput(!outputOn);
+  } else if (strcmp(deviceName, "leds") == 0 && strcmp(commandName, "on") == 0) {
+    set_led(true, ledBrightness);
+  } else if (strcmp(deviceName, "leds") == 0 && strcmp(commandName, "off") == 0) {
+    set_led(false, ledBrightness);
+  } else if (strcmp(deviceName, "leds") == 0 && strcmp(commandName, "col") == 0) {
+    const char *colorValue = message["col"] | "";
+    uint32_t color;
+    if (!parseHexColor(colorValue, color)) {
+      sendStatus(sender, senderPort, '2');
+      return;
+    }
+    ledColor = color;
+    set_led(ledOn, ledBrightness);
+  } else if (strcmp(deviceName, "leds") == 0 && strcmp(commandName, "brightness") == 0) {
+    const int brightness = message["brightness"].as<int>();
+    if (brightness < 0 || brightness > 255) {
+      sendStatus(sender, senderPort, '2');
+      return;
+    }
+    set_led(ledOn, brightness);
   } else {
     // Add logic for typed commands here. For example:
-    // if (strcmp(command->name, "change_temp") == 0) {
+    // if (strcmp(commandName, "change_temp") == 0) {
     //   const int targetTemperature = message["change_temp"];
     //   // Set the thermostat to targetTemperature.
     // }
@@ -235,17 +292,35 @@ void handlePacket() {
 
   // === ADD YOUR OWN DEVICE LOGIC HERE ===
   // For example: read a sensor, move a servo, control a motor, or update a display.
-  // `command->name` contains the requested command and `message` contains the full JSON payload.
+  // `commandName` contains the requested command and `message` the full payload.
 
-  Serial.printf("Command '%s' completed for '%s'\n", command->name, device->name);
+  Serial.printf("Command '%s' (%s) completed for '%s'\n", commandName, commandType, deviceName);
   sendStatus(sender, senderPort, '1');
 }
 
 
 void setup() {
   Serial.begin(115200);
+  const DeserializationError configError = deserializeJson(room_info, ROOM_INFO_JSON);
+  if (configError) {
+    Serial.printf("Invalid room_info JSON: %s\n", configError.c_str());
+    while (true) {
+      delay(1000);
+    }
+  }
+  if (!room_info["device"].is<JsonObject>()) {
+    Serial.println("room_info must contain a 'device' object.");
+    while (true) {
+      delay(1000);
+    }
+  }
+
   pinMode(OUTPUT_PIN, OUTPUT);
   setOutput(false);
+  pinMode(LED_RED_PIN, OUTPUT);
+  pinMode(LED_GREEN_PIN, OUTPUT);
+  pinMode(LED_BLUE_PIN, OUTPUT);
+  set_led(false, ledBrightness);
 
   connectToWifi();
   if (!udp.begin(DISCOVERY_PORT)) {

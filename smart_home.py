@@ -1,6 +1,9 @@
 import ipaddress
 import json
 import logging
+import queue
+import sys
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import socket
@@ -209,20 +212,55 @@ def is_advertised_command(room, device, message):
     return False
 
 
+def read_terminal_commands(command_queue):
+    for line in sys.stdin:
+        command_queue.put(line.strip())
+
+
 def main():
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, PORT))
         server.listen()
+        server.settimeout(1)
 
         logger.info("Listening for TCP clients on %s:%s", HOST, PORT)
         discover_rooms()
         logger.info("Available rooms: %s", ", ".join(rooms) or "none")
 
+        command_queue = queue.Queue()
+        threading.Thread(
+            target=read_terminal_commands,
+            args=(command_queue,),
+            daemon=True,
+        ).start()
+        next_discovery = time.monotonic() + 60
+
         while True:
             try:
-                client, address = server.accept()
+                command = ""
+                try:
+                    command = command_queue.get_nowait()
+                except queue.Empty:
+                    pass
+
+                if command:
+                    if command.lower() == "discover":
+                        discover_rooms()
+                        logger.info("Available rooms: %s", ", ".join(rooms) or "none")
+                    elif command:
+                        logger.warning("Unknown server command: %s", command)
+
+                if time.monotonic() >= next_discovery:
+                    next_discovery = time.monotonic() + 60
+                    discover_rooms()
+                    logger.info("Available rooms: %s", ", ".join(rooms) or "none")
+
+                try:
+                    client, address = server.accept()
+                except socket.timeout:
+                    continue
 
                 with client:
                     logger.info("Client connected: %s:%s", address[0], address[1])
