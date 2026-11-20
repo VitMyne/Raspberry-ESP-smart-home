@@ -59,6 +59,9 @@ def get_wifi_network():
 HOST, WIFI_NETWORK = get_wifi_network()
 PORT = 37019
 DISCOVERY_PORT = 37020
+SERVER_DISCOVERY_REQUEST = b"ping smart home"
+SERVER_DISCOVERY_RESPONSE = b"pong from smart home"
+MAX_TCP_MESSAGE_SIZE = 4096
 rooms = {}
 COMMAND_TYPES = {"raw", "int", "str", "bool", "list"}
 
@@ -92,6 +95,36 @@ def configure_logging():
 logger = configure_logging()
 logger.info("Network detected: %s", WIFI_NETWORK)
 logger.info("Server port: %s", PORT)
+
+
+def respond_to_server_discovery(discovery_socket):
+    """Reply to client broadcasts used to locate the server on the LAN."""
+    while True:
+        try:
+            message, address = discovery_socket.recvfrom(1024)
+            if message == SERVER_DISCOVERY_REQUEST:
+                discovery_socket.sendto(SERVER_DISCOVERY_RESPONSE, address)
+        except OSError:
+            logger.exception("Server UDP discovery listener stopped unexpectedly.")
+            return
+
+
+def receive_tcp_message(connection):
+    """Read one newline-delimited TCP message, tolerating arbitrary packet splits."""
+    message = bytearray()
+    while len(message) <= MAX_TCP_MESSAGE_SIZE:
+        chunk = connection.recv(min(1024, MAX_TCP_MESSAGE_SIZE + 1 - len(message)))
+        if not chunk:
+            break
+        delimiter = chunk.find(b"\n")
+        message.extend(chunk if delimiter < 0 else chunk[:delimiter])
+        if len(message) > MAX_TCP_MESSAGE_SIZE:
+            raise ValueError("TCP message exceeds the maximum size.")
+        if delimiter >= 0:
+            return bytes(message)
+    if len(message) > MAX_TCP_MESSAGE_SIZE:
+        raise ValueError("TCP message exceeds the maximum size.")
+    return bytes(message)
 
 
 def is_command_schema(commands):
@@ -228,11 +261,31 @@ def is_advertised_command(room, device, message):
 
 
 def read_terminal_commands(command_queue):
-    for line in sys.stdin:
+    stdin_buffer = getattr(sys.stdin, "buffer", None)
+    if stdin_buffer is None:
+        for line in sys.stdin:
+            command_queue.put(line.strip())
+        return
+
+    for raw_line in stdin_buffer:
+        try:
+            line = raw_line.decode("utf-8")
+        except UnicodeDecodeError:
+            logger.warning("Ignored terminal input containing invalid UTF-8.")
+            continue
         command_queue.put(line.strip())
 
 
 def main():
+    discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    discovery_socket.bind(("", PORT))
+    threading.Thread(
+        target=respond_to_server_discovery,
+        args=(discovery_socket,),
+        daemon=True,
+    ).start()
+    logger.info("Listening for UDP server discovery on port %s", PORT)
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -284,13 +337,14 @@ def main():
                         client.sendall(b"2")
                         continue
                     try:
-                        message = json.loads(client.recv(1024).decode("utf-8"))
+                        message = json.loads(receive_tcp_message(client).decode("utf-8"))
                         if message == {"cmd": "list_rooms"}:
                             logger.info("Client %s requested the room list", address[0])
-                            client.sendall(json.dumps({"rooms": rooms}).encode("utf-8"))
+                            discover_rooms()
+                            client.sendall(json.dumps({"rooms": rooms}).encode("utf-8") + b"\n")
                         else:
                             client.sendall(forward_to_room(message))
-                    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
                         logger.warning("Rejected malformed request from %s: %s", address[0], error)
                         client.sendall(b"2")
 

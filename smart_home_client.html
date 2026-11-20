@@ -5,56 +5,199 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Smart Home Client</title>
   <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #10131a; color: #eef2ff; }
-    body { max-width: 850px; margin: 2rem auto; padding: 0 1rem; }
-    header, .toolbar, .device, .command, .device-actions { display: flex; gap: .75rem; align-items: center; }
-    header { justify-content: space-between; } button { background: #4f7cff; color: white; border: 0; border-radius: .45rem; padding: .6rem .9rem; cursor: pointer; }
-    button:hover { background: #3c67de; } button.selected { outline: 3px solid #99b3ff; }
-    button.bool-toggle[aria-pressed="true"] { background: #23885a; }
-    #rooms { display: grid; gap: .7rem; margin: 1rem 0 1.5rem; }
-    .room, .device, .command, .settings { background: #1b2130; border-radius: .6rem; }
-    .room { overflow: hidden; }
-    .room > summary { display: flex; gap: .65rem; align-items: center; padding: 1rem; cursor: pointer; list-style: none; }
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0b1118;
+      color: #edf4f6;
+      font-synthesis: none;
+      --panel: #121d25;
+      --panel-raised: #182630;
+      --border: #293943;
+      --muted: #91a6ad;
+      --accent: #61dfbd;
+      --accent-strong: #20ba96;
+      --danger: #ff8e83;
+    }
+    * { box-sizing: border-box; }
+    body {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 4rem;
+      background: radial-gradient(ellipse at 50% -20%, #19342f 0, transparent 48%);
+      min-height: 100vh;
+    }
+    button, input, textarea { font: inherit; }
+    button {
+      border: 1px solid transparent;
+      border-radius: .65rem;
+      padding: .68rem .95rem;
+      background: var(--accent);
+      color: #08251e;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .16s ease, transform .16s ease, border-color .16s ease;
+    }
+    button:hover { background: #8af0d4; transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+    .secondary-button { background: var(--panel-raised); color: #dce9e9; border-color: var(--border); }
+    .secondary-button:hover { background: #233740; }
+    .eyebrow, .section-kicker { color: var(--accent); font-size: .73rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .topbar, .topbar-actions, .section-heading, .room-heading, .device-heading, .command-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .topbar { margin-bottom: 2.2rem; }
+    .brand { display: flex; align-items: center; gap: .8rem; }
+    .brand-mark {
+      display: grid;
+      width: 2.7rem;
+      aspect-ratio: 1;
+      place-items: center;
+      border: 1px solid #2e5e55;
+      border-radius: .9rem;
+      background: #133129;
+      color: var(--accent);
+      font-size: 1.3rem;
+    }
+    .brand-name { font-weight: 750; letter-spacing: .02em; }
+    .hero { display: flex; justify-content: space-between; align-items: end; gap: 2rem; margin-bottom: 1.6rem; }
+    h1 { margin: .45rem 0 .5rem; font-size: clamp(2.2rem, 5vw, 3.6rem); letter-spacing: -.055em; line-height: 1; }
+    .intro { max-width: 34rem; margin: 0; color: var(--muted); line-height: 1.65; }
+    .connection {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      padding: .55rem .8rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #111b22;
+      color: #c4d2d3;
+      font-size: .82rem;
+      white-space: nowrap;
+    }
+    .connection::before { content: ""; width: .5rem; aspect-ratio: 1; border-radius: 50%; background: #f0bf67; box-shadow: 0 0 12px #f0bf6770; }
+    .connection.online::before { background: var(--accent); box-shadow: 0 0 12px #61dfbd80; }
+    .connection.offline::before { background: var(--danger); box-shadow: 0 0 12px #ff8e8380; }
+    .overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; margin: 1.7rem 0 2.5rem; }
+    .stat-card { padding: 1.1rem 1.2rem; border: 1px solid var(--border); border-radius: .9rem; background: #101a21cc; }
+    .stat-label { color: var(--muted); font-size: .78rem; }
+    .stat-value { display: block; margin-top: .2rem; font-size: 1.55rem; font-weight: 750; letter-spacing: -.04em; }
+    .section-heading { align-items: end; margin-bottom: 1rem; }
+    .section-heading h2 { margin: .35rem 0 0; font-size: 1.35rem; letter-spacing: -.025em; }
+    #rooms { display: grid; gap: .9rem; }
+    .room, .device, .command, .settings { border: 1px solid var(--border); border-radius: .9rem; background: var(--panel); }
+    .room { overflow: hidden; transition: border-color .16s ease, background .16s ease; }
+    .room:hover { border-color: #3a555b; }
+    .room > summary { display: flex; align-items: center; gap: .9rem; padding: 1.15rem 1.25rem; cursor: pointer; list-style: none; }
     .room > summary::-webkit-details-marker { display: none; }
-    .room > summary::before { content: ">"; width: 1rem; color: #aeb9d2; font-family: ui-monospace, monospace; }
-    .room[open] > summary::before { content: "v"; }
-    .room-name { font-size: 1.15rem; font-weight: 650; }
-    .room-body { padding: 0 1rem 1rem; }
-    .room .device { margin-top: .7rem; background: #252e42; padding: 1rem; flex-wrap: wrap; }
+    .room > summary::before { content: "+"; display: grid; width: 1.7rem; aspect-ratio: 1; flex: 0 0 auto; place-items: center; border: 1px solid var(--border); border-radius: .55rem; color: var(--accent); font-family: ui-monospace, monospace; }
+    .room[open] > summary::before { content: "−"; }
+    .room-heading { flex: 1; min-width: 0; }
+    .room-name { font-size: 1.05rem; font-weight: 720; }
+    .room-meta { display: flex; align-items: center; gap: .75rem; color: var(--muted); font-size: .8rem; }
+    .count-badge { padding: .3rem .55rem; border: 1px solid #315148; border-radius: 999px; background: #142a25; color: #9debd4; font-size: .72rem; white-space: nowrap; }
+    .room-body { padding: 0 1.25rem 1.25rem; }
+    .room-tools { display: flex; justify-content: flex-end; padding: .1rem 0 .6rem; }
+    .room-tools input { max-width: 250px; }
+    .room .device { display: grid; grid-template-columns: minmax(150px, 1fr) auto; gap: .8rem 1rem; align-items: center; margin-top: .7rem; padding: 1rem; background: var(--panel-raised); }
+    .device-heading { justify-content: flex-start; min-width: 0; }
+    .device-icon { display: grid; width: 2.4rem; aspect-ratio: 1; flex: 0 0 auto; place-items: center; border-radius: .7rem; background: #263b40; color: var(--accent); }
+    .device-title { overflow-wrap: anywhere; font-weight: 700; }
+    .device .details { min-width: 0; }
+    .id { color: var(--muted); font-family: ui-monospace, monospace; font-size: .76rem; overflow-wrap: anywhere; }
+    .device-actions { display: flex; grid-column: 1 / -1; flex-wrap: wrap; align-items: center; gap: .55rem; }
+    .device-actions button { padding: .5rem .75rem; font-size: .84rem; }
+    .device-actions .boolean-toggle { display: inline-flex; align-items: center; gap: .65rem; }
+    .boolean-toggle .toggle-state { min-width: 2.4rem; padding: .18rem .4rem; border-radius: 999px; background: #26363d; color: #b6c6c8; font-size: .7rem; text-align: center; }
+    .boolean-toggle.is-on { border-color: #397c6b; background: #15362e; color: #b9f4e3; }
+    .boolean-toggle.is-on .toggle-state { background: var(--accent); color: #08251e; }
+    .typed-command { display: inline-flex; align-items: end; gap: .45rem; padding: .45rem; border: 1px solid var(--border); border-radius: .7rem; background: #111b22; }
+    .typed-command label { display: grid; gap: .3rem; color: var(--muted); font-size: .72rem; }
+    .typed-command input { width: 120px; padding: .45rem .55rem; }
     #developer-command[hidden] { display: none; }
-    .device-actions { flex-wrap: wrap; } .typed-command { display: flex; gap: .4rem; align-items: center; }
-    .device .details { flex: 1; min-width: 150px; } .id { color: #aeb9d2; font-family: ui-monospace, monospace; font-size: .85rem; }
-    .device input[data-name-room] { width: 130px; }
     .device-select { display: none; }
     body.developer-mode .device-select { display: inline-block; }
-    input, textarea { background: #0e1320; color: inherit; border: 1px solid #4a5875; border-radius: .35rem; padding: .55rem; }
-    textarea { width: 100%; min-height: 130px; resize: vertical; font-family: ui-monospace, monospace; }
-    .status { min-height: 1.5rem; color: #a9c5ff; } .error { color: #ff9b9b; }
-    .settings { margin: 1rem 0; } .settings summary { cursor: pointer; font-weight: 600; } .settings label { display: inline-flex; gap: .5rem; align-items: center; margin-top: .8rem; }
+    input, textarea { min-width: 0; border: 1px solid var(--border); border-radius: .6rem; padding: .62rem .75rem; background: #0b141a; color: inherit; }
+    input::placeholder, textarea::placeholder { color: #72868d; }
+    .device input[data-name-room] { width: 100%; }
+    .settings { margin-top: 1.25rem; padding: .9rem 1rem; }
+    .settings summary { cursor: pointer; color: #d5e0e1; font-weight: 650; }
+    .settings label { display: inline-flex; gap: .6rem; align-items: center; margin-top: .8rem; color: var(--muted); font-size: .9rem; }
+    .settings input { accent-color: var(--accent-strong); }
+    .status { min-height: 1.3rem; margin: .8rem 0 0; color: var(--muted); font-size: .86rem; }
+    .status.error { color: var(--danger); }
+    .empty-state { padding: 2.5rem 1rem; border: 1px dashed #34474e; border-radius: .9rem; color: var(--muted); text-align: center; }
+    .empty-state strong { display: block; margin-bottom: .35rem; color: #e4eeee; }
+    .command { display: grid; gap: .8rem; margin-top: 1.3rem; padding: 1.2rem; }
+    .command > label { color: var(--muted); font-size: .82rem; }
+    textarea { width: 100%; min-height: 130px; resize: vertical; font-family: ui-monospace, monospace; line-height: 1.5; }
+    .command-row { justify-content: flex-start; flex-wrap: wrap; }
+    @media (max-width: 650px) {
+      body { padding: 1.2rem 1rem 3rem; }
+      .topbar { margin-bottom: 2.5rem; }
+      .hero { align-items: flex-start; flex-direction: column; gap: 1rem; }
+      .overview { margin: 1.3rem 0 2rem; }
+      .room > summary { padding: 1rem; }
+      .room-meta { align-items: flex-end; flex-direction: column; gap: .35rem; text-align: right; }
+      .room-body { padding: 0 .8rem .8rem; }
+      .room .device { grid-template-columns: minmax(0, 1fr); padding: .85rem; }
+      .device-actions { grid-column: 1; }
+      .device-heading { grid-column: 1; }
+      .room-tools input { max-width: none; width: 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
   </style>
 </head>
 <body>
-  <header><h1>Smart Home</h1><button id="refresh">Refresh rooms</button></header>
-  <p id="status" class="status">Loading rooms…</p>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">⌂</span><span class="brand-name">SMART HOME</span></div>
+    <div class="topbar-actions"><span id="connection" class="connection">Connecting</span><button id="refresh" class="secondary-button">Refresh</button></div>
+  </header>
+  <main>
+    <section class="hero">
+      <div><span class="eyebrow">Opensource smart home software and hardware</span><h1>Smart home</h1><p class="intro">See what’s connected and control your rooms from one clear dashboard.</p></div>
+    </section>
+    <section class="overview" aria-label="Home overview">
+      <div class="stat-card"><span class="stat-label">Rooms online</span><strong id="room-count" class="stat-value">—</strong></div>
+      <div class="stat-card"><span class="stat-label">Devices available</span><strong id="device-count" class="stat-value">—</strong></div>
+    </section>
+    <section aria-labelledby="rooms-title">
+      <div class="section-heading"><div><span class="section-kicker">Overview</span><h2 id="rooms-title">Your rooms</h2></div></div>
+      <p id="status" class="status" role="status" aria-live="polite">Connecting to your home…</p>
+      <div id="rooms"></div>
+    </section>
+  </main>
   <details class="settings">
-    <summary>Settings</summary>
+    <summary>Settings &amp; developer tools</summary>
     <label><input id="developer-mode" type="checkbox"> Developer mode — allow custom JSON commands</label>
   </details>
-  <section id="rooms"></section>
   <section id="developer-command" class="command" hidden>
-    <strong id="selected">Select a room device</strong>
+    <strong id="selected">Select a device to send a custom command</strong>
     <label for="command">Custom command JSON</label>
-    <textarea id="command" spellcheck="false">{"power": true}</textarea>
-    <button id="send" disabled>Send custom command</button>
+    <textarea id="command" spellcheck="false">{"cmd": "on"}</textarea>
+    <div class="command-row"><button id="send" disabled>Send command</button><span class="id">Commands are validated against the device’s advertised schema.</span></div>
   </section>
   <script>
-    const state = { rooms: {}, names: {}, selected: null, openRooms: new Set(), boolValues: {} };
+    const state = { rooms: {}, names: {}, selected: null, openRooms: new Set(), booleanStates: new Map() };
     const roomsElement = document.querySelector('#rooms');
     const statusElement = document.querySelector('#status');
     const selectedElement = document.querySelector('#selected');
     const sendButton = document.querySelector('#send');
     const developerModeToggle = document.querySelector('#developer-mode');
     const developerCommandElement = document.querySelector('#developer-command');
+    const connectionElement = document.querySelector('#connection');
+    const roomCountElement = document.querySelector('#room-count');
+    const deviceCountElement = document.querySelector('#device-count');
 
     const escapeHtml = value => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
     function setStatus(message, error = false) { statusElement.textContent = message; statusElement.className = error ? 'status error' : 'status'; }
@@ -64,16 +207,22 @@
     }
     function render() {
       const entries = Object.entries(state.rooms);
-      if (!entries.length) { roomsElement.innerHTML = '<p>No rooms are currently discovered by the server.</p>'; return; }
+      const deviceCount = entries.reduce((count, [, room]) => count + Object.keys(room.devices).length, 0);
+      roomCountElement.textContent = entries.length;
+      deviceCountElement.textContent = deviceCount;
+      if (!entries.length) {
+        roomsElement.innerHTML = '<div class="empty-state"><strong>No rooms found yet</strong>Make sure your room controllers are powered on, then refresh.</div>';
+        return;
+      }
       roomsElement.innerHTML = entries.map(([roomId, room]) => `
         <details class="room" data-room="${escapeHtml(roomId)}" ${state.openRooms.has(roomId) ? 'open' : ''}>
-        <summary><span class="room-name">${escapeHtml(state.names[roomKey(roomId)] || room.friendly_name || roomId)}</span><span class="id">${escapeHtml(roomId)} · Controller: ${escapeHtml(room.address)}</span></summary>
-        <div class="room-body"><input data-room-name="${escapeHtml(roomId)}" aria-label="Friendly room name for ${escapeHtml(roomId)}" value="${escapeHtml(state.names[roomKey(roomId)] || '')}" placeholder="Friendly room name">
+        <summary><span class="room-heading"><span class="room-name">${escapeHtml(state.names[roomKey(roomId)] || roomId)}</span><span class="room-meta"><span class="id">${escapeHtml(roomId)} · ${escapeHtml(room.address)}</span><span class="count-badge">${Object.keys(room.devices).length} device${Object.keys(room.devices).length === 1 ? '' : 's'}</span></span></span></summary>
+        <div class="room-body"><div class="room-tools"><input data-room-name="${escapeHtml(roomId)}" aria-label="Friendly room name for ${escapeHtml(roomId)}" value="${escapeHtml(state.names[roomKey(roomId)] || '')}" placeholder="Set a friendly room name"></div>
         ${Object.entries(room.devices).map(([deviceId, device]) => {
           const key = deviceKey(roomId, deviceId); const selected = state.selected && state.selected.room === roomId && state.selected.device === deviceId;
-          return `<article class="device"><div class="details"><strong>${escapeHtml(state.names[key] || device.friendly_name || deviceId)}</strong><div class="id">${escapeHtml(deviceId)}</div></div>
-          <input data-name-room="${escapeHtml(roomId)}" data-name-device="${escapeHtml(deviceId)}" value="${escapeHtml(state.names[key] || '')}" placeholder="Friendly name">
-          <button data-select-room="${escapeHtml(roomId)}" data-select-device="${escapeHtml(deviceId)}" class="device-select ${selected ? 'selected' : ''}">Select</button>
+          return `<article class="device"><div class="device-heading"><span class="device-icon" aria-hidden="true">⌁</span><div class="details"><div class="device-title">${escapeHtml(state.names[key] || deviceId)}</div><div class="id">${escapeHtml(deviceId)}</div></div></div>
+          <input data-name-room="${escapeHtml(roomId)}" data-name-device="${escapeHtml(deviceId)}" aria-label="Friendly name for ${escapeHtml(deviceId)}" value="${escapeHtml(state.names[key] || '')}" placeholder="Set friendly name">
+          <button data-select-room="${escapeHtml(roomId)}" data-select-device="${escapeHtml(deviceId)}" class="device-select secondary-button ${selected ? 'selected' : ''}">Use for custom command</button>
           <div class="device-actions">${device.cmds.map(command => commandControl(roomId, deviceId, command)).join('') || '<span class="id">No commands advertised</span>'}</div></article>`;
         }).join('')}</div></details>`).join('');
       document.querySelectorAll('details[data-room]').forEach(room => room.addEventListener('toggle', () => {
@@ -85,17 +234,17 @@
       document.querySelectorAll('[data-room-name]').forEach(input => input.onchange = () => saveRoomName(input.dataset.roomName, input.value));
       document.querySelectorAll('[data-raw-command]').forEach(button => button.onclick = () => sendCommand(button.dataset.room, button.dataset.device, {cmd: button.dataset.rawCommand}));
       document.querySelectorAll('[data-run-command]').forEach(button => button.onclick = () => runTypedCommand(button));
-      document.querySelectorAll('[data-bool-command]').forEach(button => button.onclick = () => toggleBoolCommand(button));
+      document.querySelectorAll('[data-boolean-command]').forEach(button => button.onclick = () => toggleBoolean(button));
     }
     function deviceKey(room, device) { return `${room}/${device}`; }
     function roomKey(room) { return `@room:${room}`; }
+    function booleanStateKey(room, device, command) { return JSON.stringify([room, device, command]); }
     function commandControl(room, device, command) {
       const name = escapeHtml(command.name); const type = escapeHtml(command.type); const roomId = escapeHtml(room); const deviceId = escapeHtml(device);
       if (command.type === 'raw') return `<button data-raw-command="${name}" data-room="${roomId}" data-device="${deviceId}">${name}</button>`;
       if (command.type === 'bool') {
-        const key = `${deviceKey(room, device)}/${command.name}`;
-        const value = state.boolValues[key] === true;
-        return `<button class="bool-toggle" data-bool-command data-room="${roomId}" data-device="${deviceId}" data-command-name="${name}" aria-pressed="${value}">${name}: ${value ? 'ON' : 'OFF'}</button>`;
+        const enabled = state.booleanStates.get(booleanStateKey(room, device, command.name)) ?? false;
+        return `<button type="button" role="switch" aria-checked="${enabled}" aria-label="${name}" class="boolean-toggle secondary-button ${enabled ? 'is-on' : ''}" data-boolean-command data-room="${roomId}" data-device="${deviceId}" data-command-name="${name}">${name}<span class="toggle-state">${enabled ? 'On' : 'Off'}</span></button>`;
       }
       const input = command.type === 'int'
         ? `<input data-command-value type="number" step="1" placeholder="number">`
@@ -105,12 +254,16 @@
       return `<span class="typed-command"><label>${name} (${type}) ${input}</label><button data-run-command data-room="${roomId}" data-device="${deviceId}" data-command-name="${name}" data-command-type="${type}">Send</button></span>`;
     }
     function selectDevice(room, device) {
-      state.selected = {room, device}; const key = deviceKey(room, device); const deviceInfo = state.rooms[room].devices[device]; selectedElement.textContent = `Selected: ${room} / ${state.names[key] || deviceInfo.friendly_name || device}`; sendButton.disabled = false; render();
+      state.selected = {room, device}; const key = deviceKey(room, device); selectedElement.textContent = `Selected: ${room} / ${state.names[key] || device}`; sendButton.disabled = false; render();
     }
     async function refresh() {
+      document.querySelector('#refresh').disabled = true;
       setStatus('Loading rooms…');
-      try { const response = await fetch('/api/rooms'); const data = await response.json(); if (!response.ok) throw Error(data.error); state.rooms = data.rooms; state.names = data.names; render(); setStatus(`${Object.keys(data.rooms).length} room(s) found.`); }
-      catch (error) { setStatus(error.message, true); }
+      connectionElement.textContent = 'Connecting';
+      connectionElement.className = 'connection';
+      try { const response = await fetch('/api/rooms'); const data = await response.json(); if (!response.ok) throw Error(data.error); state.rooms = data.rooms; state.names = data.names; render(); setStatus(`${Object.keys(data.rooms).length} room(s) found.`); connectionElement.textContent = 'Connected'; connectionElement.className = 'connection online'; }
+      catch (error) { setStatus(error.message, true); connectionElement.textContent = 'Offline'; connectionElement.className = 'connection offline'; }
+      finally { document.querySelector('#refresh').disabled = false; }
     }
     async function saveName(room, device, name) {
       try { const response = await fetch('/api/names', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({room, device, name})}); const data = await response.json(); if (!response.ok) throw Error(data.error); state.names[deviceKey(room, device)] = name.trim(); render(); setStatus('Name saved.'); }
@@ -124,17 +277,19 @@
       try { const response = await fetch('/api/send', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({room, device, command})}); const data = await response.json(); if (!response.ok) throw Error(data.error); setStatus(data.response); return data.response === 'Device reported success.'; }
       catch (error) { setStatus(error.message, true); return false; }
     }
-    async function toggleBoolCommand(button) {
+    async function toggleBoolean(button) {
       const {room, device, commandName} = button.dataset;
-      const key = `${deviceKey(room, device)}/${commandName}`;
-      const nextValue = state.boolValues[key] !== true;
+      const key = booleanStateKey(room, device, commandName);
+      const enabled = !(state.booleanStates.get(key) ?? false);
       button.disabled = true;
-      if (await sendCommand(room, device, {[commandName]: nextValue})) {
-        state.boolValues[key] = nextValue;
-        render();
-      } else {
-        button.disabled = false;
+      const succeeded = await sendCommand(room, device, {[commandName]: enabled});
+      if (succeeded) {
+        state.booleanStates.set(key, enabled);
+        button.setAttribute('aria-checked', String(enabled));
+        button.classList.toggle('is-on', enabled);
+        button.querySelector('.toggle-state').textContent = enabled ? 'On' : 'Off';
       }
+      button.disabled = false;
     }
     function runTypedCommand(button) {
       const input = button.parentElement.querySelector('[data-command-value]');

@@ -5,10 +5,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import socket
+import time
 import webbrowser
 
 
 PORT = 37019
+MAX_TCP_RESPONSE_SIZE = 65536
+SERVER_DISCOVERY_REQUEST = b"ping smart home"
+SERVER_DISCOVERY_RESPONSE = b"pong from smart home"
+SERVER_DISCOVERY_TIMEOUT = 3
 NAMES_FILE = Path(__file__).with_name("smart_home_device_names.json")
 
 
@@ -31,8 +36,45 @@ def save_names(names):
 def request(server_host, message):
     """Send one JSON message to the server and return its response."""
     with socket.create_connection((server_host, PORT), timeout=5) as client:
-        client.sendall(json.dumps(message).encode("utf-8"))
-        return client.recv(4096)
+        client.sendall(json.dumps(message).encode("utf-8") + b"\n")
+        response = bytearray()
+        while len(response) <= MAX_TCP_RESPONSE_SIZE:
+            chunk = client.recv(min(4096, MAX_TCP_RESPONSE_SIZE + 1 - len(response)))
+            if not chunk:
+                break
+
+            if not response and chunk[:1] in (b"0", b"1", b"2"):
+                return chunk[:1]
+
+            delimiter = chunk.find(b"\n")
+            response.extend(chunk if delimiter < 0 else chunk[:delimiter])
+            if len(response) > MAX_TCP_RESPONSE_SIZE:
+                raise RuntimeError("The server response exceeds the maximum size.")
+            if delimiter >= 0:
+                return bytes(response)
+
+        if len(response) > MAX_TCP_RESPONSE_SIZE:
+            raise RuntimeError("The server response exceeds the maximum size.")
+        return bytes(response)
+
+
+def discover_server(timeout=SERVER_DISCOVERY_TIMEOUT):
+    """Find the Smart Home server by broadcasting a LAN discovery request."""
+    deadline = time.monotonic() + timeout
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as discovery_socket:
+        discovery_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        discovery_socket.sendto(SERVER_DISCOVERY_REQUEST, ("255.255.255.255", PORT))
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            discovery_socket.settimeout(remaining)
+            try:
+                response, address = discovery_socket.recvfrom(1024)
+            except socket.timeout:
+                return None
+            if response == SERVER_DISCOVERY_RESPONSE:
+                return address[0]
 
 
 def get_rooms(server_host):
@@ -56,17 +98,9 @@ def get_rooms(server_host):
         and isinstance(room, dict)
         and isinstance(room.get("address"), str)
         and isinstance(room.get("devices"), dict)
-        and (
-            "friendly_name" not in room
-            or isinstance(room.get("friendly_name"), str)
-        )
         and all(
             isinstance(device_id, str)
             and isinstance(device, dict)
-            and (
-                "friendly_name" not in device
-                or isinstance(device.get("friendly_name"), str)
-            )
             and isinstance(device.get("cmds"), list)
             and all(
                 isinstance(command, dict)
@@ -94,16 +128,12 @@ def choose_device(rooms, names):
     targets = []
     print("\nDiscovered rooms and devices:")
     for room_id, room in rooms.items():
-        room_name = names.get(room_key(room_id)) or room.get("friendly_name") or room_id
-        room_label = f"{room_name} ({room_id})" if room_name != room_id else room_id
+        room_name = names.get(room_key(room_id))
+        room_label = f"{room_name} ({room_id})" if room_name else room_id
         print(f"  {room_label} ({room['address']}):")
         for device_id, device in room["devices"].items():
             targets.append((room_id, device_id))
-            friendly_name = (
-                names.get(device_key(room_id, device_id))
-                or device.get("friendly_name")
-                or device_id
-            )
+            friendly_name = names.get(device_key(room_id, device_id), device_id)
             commands = ", ".join(
                 f"{command['name']} ({command['type']})" for command in device["cmds"]
             ) or "no advertised commands"
@@ -128,11 +158,7 @@ def rename_room(rooms, names):
     room_ids = list(rooms)
     print("Rooms:")
     for index, room_id in enumerate(room_ids, start=1):
-        friendly_name = (
-            names.get(room_key(room_id))
-            or rooms[room_id].get("friendly_name")
-            or room_id
-        )
+        friendly_name = names.get(room_key(room_id), room_id)
         print(f"  {index}. {friendly_name} ({room_id})")
     choice = input("Room number to rename: ").strip()
     if not choice.isdigit() or not 1 <= int(choice) <= len(room_ids):
@@ -295,9 +321,13 @@ def main():
     parser.add_argument("--cli", action="store_true", help="Use the terminal interface instead of the web UI")
     parser.add_argument("--web-port", type=int, default=8765, help="Local port for the web UI (default: 8765)")
     args = parser.parse_args()
-    server_host = args.host or input("Smart Home server IP address: ").strip()
+    server_host = args.host or discover_server()
     if not server_host:
-        raise SystemExit("A server IP address is required.")
+        raise SystemExit(
+            "Could not find a Smart Home server on the local network. "
+            "Check that the server is running and UDP port 37019 is allowed."
+        )
+    print(f"Found Smart Home server at {server_host}:{PORT}")
 
     if args.cli:
         run_cli(server_host)
