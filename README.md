@@ -1,6 +1,6 @@
 # Smart Home Server
 
-The server listens for TCP clients on the active local network address at port `37019`. At startup, it broadcasts a UDP `ping` on port `37020`. Each room controller replies with its room name and the devices and commands it manages, for example:
+The server listens for TCP clients on the active local network address at port `37019`. At startup, it broadcasts a UDP `ping` on port `37020` and also checks for new room controllers every 2 minutes. Each room controller replies with its room name and the devices and commands it manages, for example:
 
 ```json
 {
